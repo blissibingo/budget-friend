@@ -16,6 +16,14 @@ const {
 } = require('./helpers/testDb');
 
 const SAMPLE_PDF = path.join(__dirname, '..', 'parser', 'tests', 'sample_statement.pdf');
+const SAMPLE_CREDIT_PDF = path.join(
+  __dirname, '..', 'parser', 'tests', 'sample_credit_statement.pdf'
+);
+
+const PDF_FOR_SOURCE = {
+  rbc_debit: SAMPLE_PDF,
+  rbc_credit: SAMPLE_CREDIT_PDF,
+};
 
 let server;
 let baseUrl;
@@ -37,10 +45,12 @@ beforeEach(async () => {
   await clearCustomCategories();
 });
 
-function buildForm({ withSource = true, pdfBuffer, source = 'rbc_debit' } = {}) {
+// defaults to the sample statement the source expects, unless one is given
+function buildForm({ withSource = true, pdfBuffer, pdfPath, source = 'rbc_debit' } = {}) {
   const form = new FormData();
   if (withSource) form.append('source', source);
-  const buffer = pdfBuffer ?? fs.readFileSync(SAMPLE_PDF);
+  const buffer =
+    pdfBuffer ?? fs.readFileSync(pdfPath ?? PDF_FOR_SOURCE[source] ?? SAMPLE_PDF);
   form.append('pdf', new Blob([buffer]), 'statement.pdf');
   return form;
 }
@@ -153,8 +163,15 @@ test('two identical transactions on one day both persist as separate occurrences
   );
 });
 
-test('the same statement uploaded under a different source is not treated as a duplicate', async () => {
-  await fetch(`${baseUrl}/api/upload`, { method: 'POST', body: buildForm({ source: 'rbc_debit' }) });
+test('an account row is not treated as a duplicate of an identical credit row', async () => {
+  // the same six facts as a row of the credit sample, under the account source
+  await insertTransaction({
+    date: '2026-07-20',
+    amount: -5.64,
+    merchant: 'SUNRISE BAKERY',
+    description: 'SUNRISE BAKERY #221 ORLEANS ON',
+    source: 'rbc_debit',
+  });
 
   const res = await fetch(`${baseUrl}/api/upload`, {
     method: 'POST',
@@ -163,7 +180,83 @@ test('the same statement uploaded under a different source is not treated as a d
 
   const body = await res.json();
   assert.equal(body.skipped_count, 0);
-  assert.ok(body.inserted_count > 0);
+  assert.ok(body.transactions.some(t => t.merchant === 'SUNRISE BAKERY'));
+});
+
+test('a credit card statement imports with purchases negative and credits positive', async () => {
+  const res = await fetch(`${baseUrl}/api/upload`, {
+    method: 'POST',
+    body: buildForm({ source: 'rbc_credit' }),
+  });
+  assert.equal(res.status, 200);
+
+  const body = await res.json();
+  assert.equal(body.inserted_count, 14);
+  assert.equal(body.period, 'July 21, 2026 to August 18, 2026');
+
+  const purchase = body.transactions.find(t => t.merchant === 'SUNRISE BAKERY');
+  assert.equal(Number(purchase.amount), -5.64);
+  assert.equal(purchase.date.slice(0, 10), '2026-07-20');
+  assert.equal(purchase.source, 'rbc_credit');
+
+  const payments = body.transactions.filter(
+    t => t.description === 'PAYMENT - THANK YOU / PAIEMENT - MERCI'
+  );
+  assert.deepEqual(payments.map(t => Number(t.amount)).sort((a, b) => a - b), [235, 1000]);
+
+  const refund = body.transactions.find(
+    t => t.merchant === 'HARBOURVIEW CINEMA' && Number(t.amount) > 0
+  );
+  assert.equal(Number(refund.amount), 24);
+});
+
+test('a credit card upload reports no opening or closing balance', async () => {
+  const res = await fetch(`${baseUrl}/api/upload`, {
+    method: 'POST',
+    body: buildForm({ source: 'rbc_credit' }),
+  });
+
+  const body = await res.json();
+  assert.ok(!('opening_balance' in body));
+  assert.ok(!('closing_balance' in body));
+});
+
+test('re-uploading the same credit statement skips every row', async () => {
+  const form = () => buildForm({ source: 'rbc_credit' });
+
+  const first = await (await fetch(`${baseUrl}/api/upload`, { method: 'POST', body: form() })).json();
+  const second = await (await fetch(`${baseUrl}/api/upload`, { method: 'POST', body: form() })).json();
+
+  assert.equal(second.inserted_count, 0);
+  assert.equal(second.skipped_count, first.inserted_count);
+});
+
+test('an account statement uploaded as a credit statement is rejected', async () => {
+  const res = await fetch(`${baseUrl}/api/upload`, {
+    method: 'POST',
+    body: buildForm({ source: 'rbc_credit', pdfPath: SAMPLE_PDF }),
+  });
+  assert.equal(res.status, 400);
+
+  const body = await res.json();
+  assert.match(body.error, /credit card statement/);
+
+  const dbRows = await query('SELECT * FROM transactions');
+  assert.equal(dbRows.rows.length, 0);
+});
+
+test('a credit statement uploaded as an account statement is rejected', async () => {
+  const res = await fetch(`${baseUrl}/api/upload`, {
+    method: 'POST',
+    body: buildForm({ source: 'rbc_debit', pdfPath: SAMPLE_CREDIT_PDF }),
+  });
+  assert.equal(res.status, 400);
+
+  const body = await res.json();
+  assert.match(body.error, /account statement/);
+
+  const dbRows = await query('SELECT * FROM transactions');
+  assert.equal(dbRows.rows.length, 0);
 });
 
 test('parser failure on a corrupt PDF returns 500 and persists nothing', async () => {
@@ -172,6 +265,20 @@ test('parser failure on a corrupt PDF returns 500 and persists nothing', async (
     body: buildForm({ pdfBuffer: Buffer.from('not a real pdf') }),
   });
   assert.equal(res.status, 500);
+
+  const dbRows = await query('SELECT * FROM transactions');
+  assert.equal(dbRows.rows.length, 0);
+});
+
+test('an unknown source returns 400 and persists nothing', async () => {
+  const res = await fetch(`${baseUrl}/api/upload`, {
+    method: 'POST',
+    body: buildForm({ source: 'rbc_mystery' }),
+  });
+  assert.equal(res.status, 400);
+
+  const body = await res.json();
+  assert.match(body.error, /Unknown source/);
 
   const dbRows = await query('SELECT * FROM transactions');
   assert.equal(dbRows.rows.length, 0);

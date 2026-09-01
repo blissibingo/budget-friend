@@ -1,3 +1,4 @@
+import argparse
 import json
 import sys
 import pymupdf
@@ -5,15 +6,17 @@ import re
 from dataclasses import dataclass, asdict
 from typing import Optional
 
+from credit_parser import parse_credit_statement_from_bytes
+from statement_words import Transaction, group_words_by_row
 
-@dataclass
-class Transaction:
-    date: str
-    description: str
-    withdrawal: Optional[float]
-    deposit: Optional[float]
-    balance: Optional[float]
-    merchant: str = "Bank transaction"
+ACCOUNT_SOURCE = "rbc_debit"
+CREDIT_SOURCE = "rbc_credit"
+
+WRONG_SOURCE_MESSAGE = (
+    "This PDF does not look like an RBC account statement — no Date, Description, "
+    "Withdrawals, Deposits and Balance table was found. Check the source selected "
+    "at upload."
+)
 
 
 @dataclass
@@ -40,26 +43,6 @@ def _extract_amount(parts: list[str]) -> Optional[float]:
         if value is not None:
             return value
     return None
-
-
-def _group_words_by_row(words: list, y_tolerance: float = 2.0) -> list[list]:
-    """Group words into rows based on proximity of their y-coordinates."""
-    if not words:
-        return []
-
-    sorted_words = sorted(words, key=lambda w: (w[1], w[0]))
-    rows = []
-    current_row = [sorted_words[0]]
-
-    for word in sorted_words[1:]:
-        if abs(word[1] - current_row[0][1]) <= y_tolerance:
-            current_row.append(word)
-        else:
-            rows.append(sorted(current_row, key=lambda w: w[0]))
-            current_row = [word]
-    rows.append(sorted(current_row, key=lambda w: w[0]))
-
-    return rows
 
 
 def _detect_columns(header_row: list) -> StatementColumns:
@@ -91,7 +74,7 @@ def _detect_columns(header_row: list) -> StatementColumns:
 
     if None in (withdrawals_x, deposits_x, balance_x):
         raise ValueError(
-            f"Could not detect all column headers. Found: {list(header_centers.keys())}"
+            f"{WRONG_SOURCE_MESSAGE} Found headers: {list(header_centers.keys())}"
         )
 
     def midpoint(a, b):
@@ -234,7 +217,7 @@ def _parse_doc(doc) -> dict:
     if opening_balance_row_y is not None:
         data_words = [w for w in data_words if abs(w[1] - opening_balance_row_y) > 2]
 
-    data_rows = _group_words_by_row(data_words)
+    data_rows = group_words_by_row(data_words)
     transactions = _parse_transaction_rows(data_rows, cols)
     transactions = _assign_years(transactions, period)
     opening_balance = _extract_labelled_amount(all_words, "opening", "balance")
@@ -256,6 +239,15 @@ def parse_rbc_statement_from_bytes(pdf_bytes: bytes) -> dict:
     return _parse_doc(pymupdf.open(stream=pdf_bytes, filetype="pdf"))
 
 
+def parse_statement_from_bytes(pdf_bytes: bytes, source: str) -> dict:
+    """Read a statement the way the source selected at upload says to read it."""
+    if source == ACCOUNT_SOURCE:
+        return parse_rbc_statement_from_bytes(pdf_bytes)
+    if source == CREDIT_SOURCE:
+        return parse_credit_statement_from_bytes(pdf_bytes)
+    raise ValueError(f"Unknown statement source '{source}'.")
+
+
 # helper functions
 def _extract_period(words: list) -> Optional[str]:
     """Find "From <date> to <date>" in the word list."""
@@ -267,17 +259,17 @@ def _extract_period(words: list) -> Optional[str]:
 
 def _find_header_row(words: list) -> tuple[list, float]:
     """Return the row containing 'Date' and 'Description' column headers."""
-    rows = _group_words_by_row(words)
+    rows = group_words_by_row(words)
     for row in rows:
         texts = [w[4].lower() for w in row]
         if "date" in texts and "description" in texts:
             y = row[0][1]
             return row, y
-    raise ValueError("Could not find transaction table header row in PDF.")
+    raise ValueError(WRONG_SOURCE_MESSAGE)
 
 
 def _find_opening_balance_y(words: list) -> Optional[float]:
-    rows = _group_words_by_row(words)
+    rows = group_words_by_row(words)
     for row in rows:
         texts = [w[4].lower() for w in row]
         if "opening" in texts and "balance" in texts:
@@ -286,7 +278,7 @@ def _find_opening_balance_y(words: list) -> Optional[float]:
 
 
 def _find_closing_balance_y(words: list, after_y: float) -> Optional[float]:
-    rows = _group_words_by_row(words)
+    rows = group_words_by_row(words)
     for row in rows:
         if row[0][1] <= after_y:
             continue
@@ -349,7 +341,7 @@ def _extract_labelled_amount(words: list, *label_words: str) -> Optional[float]:
     """
     Find a row containing all label_words and return the rightmost numeric value on it.
     """
-    rows = _group_words_by_row(words)
+    rows = group_words_by_row(words)
     for row in rows:
         texts = [w[4].lower() for w in row]
         if all(lw in texts for lw in label_words):
@@ -365,40 +357,66 @@ def _extract_labelled_amount(words: list, *label_words: str) -> Optional[float]:
 # Entry point
 # ---------------------------------------------------------------------------
 
+UNREADABLE_STATEMENT_EXIT_CODE = 3
+
+
+def _as_json(result: dict) -> dict:
+    """Serialise a parse result, carrying only the balances the statement reports."""
+    output = {
+        key: result[key]
+        for key in ("period", "opening_balance", "closing_balance")
+        if key in result
+    }
+    output["transactions"] = [asdict(t) for t in result["transactions"]]
+    return output
+
+
+def _print_report(result: dict) -> None:
+    print(f"Period       : {result['period']}")
+    for label, key in (("Opening bal", "opening_balance"), ("Closing bal", "closing_balance")):
+        if result.get(key) is not None:
+            print(f"{label}  : ${result[key]:,.2f}")
+    print(f"Transactions : {len(result['transactions'])}")
+    print()
+
+    for t in result["transactions"]:
+        w = f"-${t.withdrawal:>8.2f}" if t.withdrawal else " " * 10
+        d = f"+${t.deposit:>8.2f}" if t.deposit else " " * 10
+        b = f"  bal=${t.balance:,.2f}" if t.balance else ""
+        print(f"  {t.date:<10}  {t.description:<40}  {w}  {d}{b}")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Parse an RBC statement into JSON.")
+    parser.add_argument("pdf", nargs="?", help="statement to parse; omit to read stdin")
+    parser.add_argument(
+        "--source",
+        required=True,
+        choices=[ACCOUNT_SOURCE, CREDIT_SOURCE],
+        help="which statement format to read",
+    )
+    args = parser.parse_args()
+
+    pdf_bytes = (
+        open(args.pdf, "rb").read() if args.pdf else sys.stdin.buffer.read()
+    )
+
+    try:
+        result = parse_statement_from_bytes(pdf_bytes, args.source)
+    except ValueError as err:
+        print(str(err), file=sys.stderr)
+        sys.exit(UNREADABLE_STATEMENT_EXIT_CODE)
+
+    if not args.pdf:
+        json.dump(_as_json(result), sys.stdout)
+        return
+
+    _print_report(result)
+    json_path = args.pdf.replace(".pdf", ".json")
+    with open(json_path, "w") as f:
+        json.dump(_as_json(result), f, indent=2)
+    print(f"\nJSON written to {json_path}")
+
+
 if __name__ == "__main__":
-    if len(sys.argv) > 1:
-        pdf_path = sys.argv[1]
-        result = parse_rbc_statement(pdf_path)
-
-        print(f"Period       : {result['period']}")
-        print(f"Opening bal  : ${result['opening_balance']:,.2f}")
-        print(f"Closing bal  : ${result['closing_balance']:,.2f}")
-        print(f"Transactions : {len(result['transactions'])}")
-        print()
-
-        for t in result["transactions"]:
-            w = f"-${t.withdrawal:>8.2f}" if t.withdrawal else " " * 10
-            d = f"+${t.deposit:>8.2f}" if t.deposit else " " * 10
-            b = f"  bal=${t.balance:,.2f}" if t.balance else ""
-            print(f"  {t.date:<10}  {t.description:<40}  {w}  {d}{b}")
-
-        output = {
-            "period": result["period"],
-            "opening_balance": result["opening_balance"],
-            "closing_balance": result["closing_balance"],
-            "transactions": [asdict(t) for t in result["transactions"]],
-        }
-        json_path = pdf_path.replace(".pdf", ".json")
-        with open(json_path, "w") as f:
-            json.dump(output, f, indent=2)
-        print(f"\nJSON written to {json_path}")
-    else:
-        pdf_bytes = sys.stdin.buffer.read()
-        result = parse_rbc_statement_from_bytes(pdf_bytes)
-        output = {
-            "period": result["period"],
-            "opening_balance": result["opening_balance"],
-            "closing_balance": result["closing_balance"],
-            "transactions": [asdict(t) for t in result["transactions"]],
-        }
-        json.dump(output, sys.stdout)
+    main()

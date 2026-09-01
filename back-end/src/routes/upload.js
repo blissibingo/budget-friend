@@ -9,14 +9,23 @@ const { toTransactionRows } = require('../statementRows');
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
 
+// the parser exits with this when it cannot read the PDF as the selected source
+const UNREADABLE_STATEMENT_EXIT_CODE = 3;
+
+// the sources the parser can read
+const SOURCES = ['rbc_debit', 'rbc_credit'];
+
 router.post('/', upload.single('pdf'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No PDF file uploaded' });
 
   const { source } = req.body;
   if (!source) return res.status(400).json({ error: 'source is required' });
+  if (!SOURCES.includes(source)) {
+    return res.status(400).json({ error: `Unknown source '${source}'` });
+  }
 
   const parserPath = path.join(__dirname, '..', '..', 'parser', 'pdf_parser.py');
-  const python = spawn('python3', [parserPath]);
+  const python = spawn('python3', [parserPath, '--source', source]);
 
   let stdout = '';
   let stderr = '';
@@ -25,6 +34,9 @@ router.post('/', upload.single('pdf'), (req, res) => {
   python.stderr.on('data', chunk => { stderr += chunk; });
 
   python.on('close', async code => {
+    if (code === UNREADABLE_STATEMENT_EXIT_CODE) {
+      return res.status(400).json({ error: stderr.trim() });
+    }
     if (code !== 0) {
       return res.status(500).json({ error: 'Parser failed', details: stderr });
     }
@@ -67,8 +79,9 @@ router.post('/', upload.single('pdf'), (req, res) => {
       });
       res.json({
         period: parsed.period,
-        opening_balance: parsed.opening_balance,
-        closing_balance: parsed.closing_balance,
+        // balances the statement does not report stay absent from the response
+        ...(parsed.opening_balance !== undefined && { opening_balance: parsed.opening_balance }),
+        ...(parsed.closing_balance !== undefined && { closing_balance: parsed.closing_balance }),
         transactions: inserted,
         inserted_count: inserted.length,
         skipped_count: skipped,

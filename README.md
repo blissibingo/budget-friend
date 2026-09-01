@@ -126,8 +126,8 @@ existing hardcoded single-user row.
 ## Future additions (post-v1)
 
 - Multi-bank/format parser templates — the parser currently only handles
-  RBC debit statements; other banks/cards will need their own column
-  templates.
+  RBC debit and RBC credit card statements; other banks/cards will need
+  their own templates.
 - Real authentication (Clerk) and deployment/hosting, so the app is usable
   outside `localhost`.
 - "Add category" UI, instead of requiring direct DB/API access.

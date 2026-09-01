@@ -6,7 +6,7 @@ from pdf_parser import (
     StatementColumns,
     _parse_amount,
     _extract_amount,
-    _group_words_by_row,
+    group_words_by_row as _group_words_by_row,
     _detect_columns,
     _assign_word_to_column,
     _extract_period,
@@ -127,7 +127,7 @@ class TestDetectColumns:
 
     def test_missing_header_raises(self):
         incomplete = [word("Date", 50, 150), word("Description", 200, 400)]
-        with pytest.raises(ValueError, match="Could not detect all column headers"):
+        with pytest.raises(ValueError, match="RBC account statement"):
             _detect_columns(incomplete)
 
 

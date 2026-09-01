@@ -34,8 +34,9 @@ export class ApiError extends Error {
 
 export type UploadResult = {
   period: string
-  opening_balance: number
-  closing_balance: number
+  // absent on a credit card statement
+  opening_balance?: number
+  closing_balance?: number
   transactions: Transaction[]
   inserted_count: number
   skipped_count: number
