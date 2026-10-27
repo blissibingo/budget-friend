@@ -15,6 +15,31 @@ const UNREADABLE_STATEMENT_EXIT_CODE = 3;
 // the sources the parser can read
 const SOURCES = ['rbc_debit', 'rbc_credit'];
 
+// the merchant the parser assigns when a description names no merchant
+const PLACEHOLDER_MERCHANT = 'bank transaction';
+
+// Finds this user's latest categorized row for the merchant, matching on
+// description too when the merchant is the placeholder.
+const MERCHANT_MEMORY_SQL = `
+  SELECT category_id FROM transactions
+  WHERE user_id = $1
+    AND category_id IS NOT NULL
+    AND lower(btrim(merchant)) = lower(btrim($2))
+  ORDER BY date DESC, id DESC
+  LIMIT 1`;
+const PLACEHOLDER_MEMORY_SQL = `
+  SELECT category_id FROM transactions
+  WHERE user_id = $1
+    AND category_id IS NOT NULL
+    AND lower(btrim(merchant)) = '${PLACEHOLDER_MERCHANT}'
+    AND lower(btrim(description)) = lower(btrim($2))
+  ORDER BY date DESC, id DESC
+  LIMIT 1`;
+
+function isPlaceholderMerchant(merchant) {
+  return merchant.trim().toLowerCase() === PLACEHOLDER_MERCHANT;
+}
+
 router.post('/', upload.single('pdf'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No PDF file uploaded' });
 
@@ -53,21 +78,19 @@ router.post('/', upload.single('pdf'), (req, res) => {
         const inserted = [];
         let skipped = 0;
         for (const row of toTransactionRows(parsed.transactions)) {
-          // Skips rows an earlier upload already persisted, and copies the
-          // category from this user's latest categorized row for the merchant.
+          const placeholder = isPlaceholderMerchant(row.merchant);
+          const memory = await client.query(
+            placeholder ? PLACEHOLDER_MEMORY_SQL : MERCHANT_MEMORY_SQL,
+            [DEFAULT_USER_ID, placeholder ? row.description : row.merchant]
+          );
+          const categoryId = memory.rows[0]?.category_id ?? null;
+          // skips rows an earlier upload already persisted
           const result = await client.query(
             `INSERT INTO transactions (amount, date, merchant, description, occurrence, source, user_id, category_id)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, (
-               SELECT category_id FROM transactions
-               WHERE user_id = $7
-                 AND category_id IS NOT NULL
-                 AND lower(btrim(merchant)) = lower(btrim($8))
-               ORDER BY date DESC, id DESC
-               LIMIT 1
-             ))
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
              ON CONFLICT ON CONSTRAINT transactions_dedupe_unique DO NOTHING
              RETURNING *`,
-            [row.amount, row.date, row.merchant, row.description, row.occurrence, source, DEFAULT_USER_ID, row.merchant]
+            [row.amount, row.date, row.merchant, row.description, row.occurrence, source, DEFAULT_USER_ID, categoryId]
           );
           if (result.rows.length === 0) {
             skipped += 1;

@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 
 const app = require('../src/index');
-const { query } = require('../src/db');
+const { query, transaction } = require('../src/db');
 const {
   ensureDefaultUser,
   ensureOtherUser,
@@ -391,4 +391,95 @@ test('categorizing an uploaded transaction never recategorizes its siblings', as
   assert.ok(others.rows.length > 1);
   assert.ok(others.rows.every(r => r.category_id === null));
   assert.equal(sibling.category_id, null);
+});
+
+async function uploadAndFindByDescription(description) {
+  const res = await fetch(`${baseUrl}/api/upload`, { method: 'POST', body: buildForm() });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  const row = body.transactions.find(t => t.description === description);
+  assert.ok(row, `upload returned no row for description ${description}`);
+  return row;
+}
+
+test('a categorized placeholder transaction does not categorize differently-described ones', async () => {
+  const category = await insertCategory('Transfer Memory');
+  await insertTransaction({
+    date: '2004-02-01',
+    amount: -500,
+    merchant: 'Bank transaction',
+    description: 'Transfer',
+    categoryId: category.id,
+  });
+
+  const row = await uploadAndFindByDescription('Cheque #30');
+  assert.equal(row.category_id, null);
+});
+
+test('a categorized placeholder transaction categorizes identically-described ones', async () => {
+  const category = await insertCategory('Cash Memory');
+  await insertTransaction({
+    date: '2004-02-01',
+    amount: -40,
+    merchant: 'Bank transaction',
+    description: 'ATM withdrawal',
+    categoryId: category.id,
+  });
+
+  const row = await uploadAndFindByDescription('ATM withdrawal');
+  assert.equal(row.category_id, category.id);
+});
+
+test('placeholder description matching ignores case and surrounding whitespace', async () => {
+  const category = await insertCategory('Cash Memory');
+  await insertTransaction({
+    date: '2004-02-01',
+    amount: -40,
+    merchant: ' bank TRANSACTION ',
+    description: '  atm WITHDRAWAL ',
+    categoryId: category.id,
+  });
+
+  const row = await uploadAndFindByDescription('ATM withdrawal');
+  assert.equal(row.category_id, category.id);
+});
+
+test('a real merchant is remembered regardless of description', async () => {
+  const category = await insertCategory('Shopping Memory');
+  await insertTransaction({
+    date: '2004-02-01',
+    amount: -50,
+    merchant: 'The Bay',
+    description: 'Some other description',
+    categoryId: category.id,
+  });
+
+  const row = await uploadAndFind('The Bay');
+  assert.equal(row.category_id, category.id);
+});
+
+test('the placeholder lookup uses the placeholder memory index', async () => {
+  const category = await insertCategory('Cash Memory');
+  await query(
+    `INSERT INTO transactions (amount, date, merchant, description, source, user_id, category_id)
+     SELECT -10, '2004-01-01', 'Bank transaction', 'Cheque #' || n, 'rbc_debit', 1, $1
+     FROM generate_series(1, 500) AS n`,
+    [category.id]
+  );
+  await query('ANALYZE transactions');
+
+  const text = await transaction(async client => {
+    await client.query('SET LOCAL enable_seqscan = off');
+    const plan = await client.query(
+      `EXPLAIN SELECT category_id FROM transactions
+       WHERE user_id = 1
+         AND category_id IS NOT NULL
+         AND lower(btrim(merchant)) = 'bank transaction'
+         AND lower(btrim(description)) = lower(btrim('ATM withdrawal'))
+       ORDER BY date DESC, id DESC
+       LIMIT 1`
+    );
+    return plan.rows.map(r => r['QUERY PLAN']).join('\n');
+  });
+  assert.match(text, /transactions_placeholder_memory_idx/);
 });
