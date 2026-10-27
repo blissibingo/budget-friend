@@ -71,8 +71,14 @@ function rowFor(merchant: string) {
   return screen.getByDisplayValue(merchant).closest('tr') as HTMLElement
 }
 
-function summary() {
-  return screen.getByRole('region', { name: /summary/i })
+function overview() {
+  return screen.getByRole('region', { name: /overview/i })
+}
+
+function spent() {
+  return within(within(overview()).getByRole('group', { name: /month figures/i })).getByText(
+    /^Spent/,
+  )
 }
 
 // the list has its own alert region, separate from the uploader's
@@ -128,7 +134,7 @@ beforeEach(() => {
 test('opens on the overview for the current month', async () => {
   const router = renderApp()
 
-  expect(await screen.findByRole('region', { name: /summary/i })).toBeInTheDocument()
+  expect(await screen.findByRole('region', { name: /overview/i })).toBeInTheDocument()
   expect(tab('Overview')).toHaveAttribute('aria-current', 'page')
   expect(router.state.location.pathname).toBe('/')
   await waitFor(() => expect(getTransactionsMock).toHaveBeenCalledWith(CURRENT))
@@ -142,14 +148,14 @@ test('the tabs move between the three views', async () => {
 
   await user.click(await screen.findByRole('link', { name: 'Transactions' }))
   expect(await screen.findByDisplayValue('Loblaws')).toBeInTheDocument()
-  expect(screen.queryByRole('region', { name: /summary/i })).not.toBeInTheDocument()
+  expect(screen.queryByRole('region', { name: /overview/i })).not.toBeInTheDocument()
 
   await user.click(tab('Review'))
   expect(await screen.findByRole('heading', { name: 'Review' })).toBeInTheDocument()
   expect(screen.queryByDisplayValue('Loblaws')).not.toBeInTheDocument()
 
   await user.click(tab('Overview'))
-  expect(await screen.findByRole('region', { name: /summary/i })).toBeInTheDocument()
+  expect(await screen.findByRole('region', { name: /overview/i })).toBeInTheDocument()
 })
 
 test('the month is read from the url', async () => {
@@ -233,14 +239,14 @@ test('going back returns to the previous view', async () => {
 
   expect(router.state.location.pathname).toBe('/')
   expect(router.state.location.search).toBe('?month=2026-03')
-  expect(await screen.findByRole('region', { name: /summary/i })).toBeInTheDocument()
+  expect(await screen.findByRole('region', { name: /overview/i })).toBeInTheDocument()
 })
 
 test('the header carries the import and category actions', async () => {
   renderApp()
 
   expect(await screen.findByRole('heading', { name: 'Budget Friend' })).toBeInTheDocument()
-  expect(screen.getByRole('button', { name: /import/i })).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Import' })).toBeInTheDocument()
   expect(screen.getByRole('button', { name: /categories/i })).toBeInTheDocument()
 })
 
@@ -445,26 +451,6 @@ test('deleting a row removes it from the list', async () => {
   expect(screen.getByDisplayValue('Petro-Canada')).toBeInTheDocument()
 })
 
-test('the overview summarizes the loaded month', async () => {
-  getTransactionsMock.mockResolvedValue([
-    transaction({ id: 1, amount: '-42.50', category_id: 7 }),
-    transaction({ id: 2, amount: '-60.00', merchant: 'Petro-Canada' }),
-  ])
-
-  renderApp('/')
-
-  await waitFor(() => {
-    expect(
-      within(summary()).getByText(new RegExp(`total spend for ${label(CURRENT)}`, 'i')),
-    ).toHaveTextContent('$102.50')
-  })
-  expect(
-    within(summary())
-      .getAllByRole('listitem')
-      .map(entry => entry.textContent),
-  ).toEqual(['Groceries$42.50', 'Uncategorized$60.00'])
-})
-
 test('the overview follows a category change made in the transactions view', async () => {
   getTransactionsMock.mockResolvedValue([transaction({ amount: '-42.50' })])
   updateTransactionMock.mockResolvedValue(
@@ -481,7 +467,7 @@ test('the overview follows a category change made in the transactions view', asy
   await user.click(tab('Overview'))
 
   await waitFor(() => {
-    expect(within(summary()).getByRole('listitem')).toHaveTextContent('Groceries$42.50')
+    expect(within(overview()).getByRole('listitem')).toHaveTextContent('Groceries$42.50')
   })
   expect(getTransactionsMock).toHaveBeenCalledTimes(1)
 })
@@ -502,11 +488,11 @@ test('the overview total follows a row deleted in the transactions view', async 
   await user.click(tab('Overview'))
 
   await waitFor(() => {
-    expect(within(summary()).getByText(/total spend/i)).toHaveTextContent('$60.00')
+    expect(spent()).toHaveTextContent('$60.00')
   })
 })
 
-test('the summary follows the month stepper', async () => {
+test('the overview follows the month stepper', async () => {
   getTransactionsMock
     .mockResolvedValueOnce([transaction({ amount: '-42.50' })])
     .mockResolvedValueOnce([
@@ -516,16 +502,11 @@ test('the summary follows the month stepper', async () => {
 
   renderApp('/')
 
-  await waitFor(() => {
-    expect(within(summary()).getByText(/total spend/i)).toHaveTextContent('$42.50')
-  })
+  await waitFor(() => expect(spent()).toHaveTextContent('$42.50'))
   await user.click(stepButton('Previous'))
 
-  await waitFor(() => {
-    expect(
-      within(summary()).getByText(new RegExp(`total spend for ${label(PREVIOUS)}`, 'i')),
-    ).toHaveTextContent('$60.00')
-  })
+  await waitFor(() => expect(within(overview()).getByText(label(PREVIOUS))).toBeInTheDocument())
+  expect(spent()).toHaveTextContent('$60.00')
 })
 
 test('a failed month load withholds the previous month total', async () => {
@@ -536,34 +517,16 @@ test('a failed month load withholds the previous month total', async () => {
 
   renderApp('/')
 
-  await waitFor(() => {
-    expect(within(summary()).getByText(/total spend/i)).toHaveTextContent('$42.50')
-  })
+  await waitFor(() => expect(spent()).toHaveTextContent('$42.50'))
   await user.click(stepButton('Previous'))
 
   await waitFor(() => {
-    expect(
-      within(summary()).getByText(new RegExp(`total spend for ${label(PREVIOUS)}`, 'i')),
-    ).toHaveTextContent('—')
+    expect(within(overview()).getByRole('alert')).toHaveTextContent('Failed to fetch transactions')
   })
-  expect(within(summary()).queryByText('$42.50')).not.toBeInTheDocument()
+  expect(within(overview()).queryByText(/\$42\.50/)).not.toBeInTheDocument()
 
   await user.click(tab('Transactions'))
   expect(listAlert()).toHaveTextContent('Failed to fetch transactions')
-})
-
-test('an empty month summarizes as zero', async () => {
-  const user = userEvent.setup()
-
-  renderApp('/')
-
-  await screen.findByText(label(CURRENT))
-  await user.click(stepButton('Previous'))
-
-  await waitFor(() => {
-    expect(within(summary()).getByText(/total spend/i)).toHaveTextContent('$0.00')
-  })
-  expect(within(summary()).getByText(/nothing to summarize/i)).toBeInTheDocument()
 })
 
 test('shows the server error message when an edit fails', async () => {

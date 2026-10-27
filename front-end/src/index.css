@@ -38,6 +38,8 @@
   --chart-8: #e66767;
   /* uncategorized, never a palette hue */
   --chart-none: #71717a;
+  /* the folded remainder of a breakdown */
+  --chart-other: #52525b;
 }
 
 @theme inline {
@@ -74,6 +76,7 @@
   --color-chart-7: var(--chart-7);
   --color-chart-8: var(--chart-8);
   --color-chart-none: var(--chart-none);
+  --color-chart-other: var(--chart-other);
 }
 
 @layer base {
