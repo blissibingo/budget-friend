@@ -11,43 +11,48 @@ import {
   type Transaction,
   type TransactionEdit,
 } from './api'
-import { currentPeriod, type Period } from './period'
+import type { Period } from './period'
 
 function errorMessage(err: unknown, fallback: string) {
   return err instanceof Error ? err.message : fallback
 }
 
-export function useTransactions() {
+export function useTransactions(period: Period) {
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [categories, setCategories] = useState<Category[]>([])
-  const [period, setPeriod] = useState<Period>(currentPeriod)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  // bumped to refetch the same month
+  const [version, setVersion] = useState(0)
+  const { month, year } = period
 
-  // switches to a month and fetches it, along with the categories rows can be
-  // assigned to
-  const loadPeriod = useCallback(async (target: Period) => {
-    setPeriod(target)
-    setLoading(true)
-    try {
-      const [loadedTransactions, loadedCategories] = await Promise.all([
-        getTransactions(target),
-        getCategories(),
-      ])
-      setTransactions(loadedTransactions)
-      setCategories(loadedCategories)
-      setError(null)
-    } catch (err) {
-      setError(errorMessage(err, 'Failed to load transactions'))
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
+  // fetches the month along with the categories rows can be assigned to,
+  // ignoring a response that a newer load has superseded
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- loadPeriod sets state after awaiting the fetch
-    void loadPeriod(currentPeriod())
-  }, [loadPeriod])
+    let current = true
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- marks the load as started
+    setLoading(true)
+
+    Promise.all([getTransactions({ month, year }), getCategories()])
+      .then(([loadedTransactions, loadedCategories]) => {
+        if (!current) return
+        setTransactions(loadedTransactions)
+        setCategories(loadedCategories)
+        setError(null)
+      })
+      .catch(err => {
+        if (current) setError(errorMessage(err, 'Failed to load transactions'))
+      })
+      .finally(() => {
+        if (current) setLoading(false)
+      })
+
+    return () => {
+      current = false
+    }
+  }, [month, year, version])
+
+  const reload = useCallback(() => setVersion(v => v + 1), [])
 
   // patches the row and swaps in what the server returned, reporting failure
   const editTransaction = useCallback(async (id: number, edit: TransactionEdit) => {
@@ -75,10 +80,9 @@ export function useTransactions() {
   return {
     transactions,
     categories,
-    period,
     loading,
     error,
-    loadPeriod,
+    reload,
     editTransaction,
     removeTransaction,
   }

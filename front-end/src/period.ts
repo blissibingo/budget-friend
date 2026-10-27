@@ -22,11 +22,29 @@ export function isSamePeriod(a: Period, b: Period): boolean {
   return a.month === b.month && a.year === b.year
 }
 
+export function isAfterPeriod(a: Period, b: Period): boolean {
+  return a.year * 12 + a.month > b.year * 12 + b.month
+}
+
 export function formatPeriod(period: Period): string {
   return new Date(period.year, period.month - 1, 1).toLocaleDateString('en-CA', {
     month: 'long',
     year: 'numeric',
   })
+}
+
+// writes the period as yyyy-mm, the form the url holds
+export function toMonthParam(period: Period): string {
+  return `${period.year}-${String(period.month).padStart(2, '0')}`
+}
+
+// reads a yyyy-mm url value, or null when it is not one
+export function fromMonthParam(value: string | null): Period | null {
+  const match = /^(\d{4})-(\d{2})$/.exec(value ?? '')
+  if (!match) return null
+  const month = Number(match[2])
+  if (month < 1 || month > 12) return null
+  return { month, year: Number(match[1]) }
 }
 
 // reads the month out of a yyyy-mm-dd date, ignoring any time part

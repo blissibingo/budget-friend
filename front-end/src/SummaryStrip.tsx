@@ -28,31 +28,33 @@ function SummaryStrip({ transactions, categories, period, loading, error }: Prop
   const stale = loading || error !== null
 
   return (
-    <section aria-labelledby={headingId}>
-      <h2 id={headingId}>Summary</h2>
+    <section aria-labelledby={headingId} className="grid gap-2">
+      <h2 id={headingId} className="text-lg font-semibold">
+        Summary
+      </h2>
 
       <p>
         Total spend for {formatPeriod(period)}{' '}
-        <strong>{stale ? '—' : money.format(summary.spending)}</strong>
+        <strong className="tabular-nums">{stale ? '—' : money.format(summary.spending)}</strong>
       </p>
       <p>
-        Income <strong>{stale ? '—' : money.format(summary.income)}</strong>
+        Income <strong className="tabular-nums">{stale ? '—' : money.format(summary.income)}</strong>
       </p>
       <p>
-        Net <strong>{stale ? '—' : money.format(summary.net)}</strong>
+        Net <strong className="tabular-nums">{stale ? '—' : money.format(summary.net)}</strong>
       </p>
       <p>
-        Saved <strong>{stale ? '—' : money.format(summary.saved)}</strong>
+        Saved <strong className="tabular-nums">{stale ? '—' : money.format(summary.saved)}</strong>
       </p>
 
       {stale ? null : summary.byCategory.length === 0 ? (
-        <p>Nothing to summarize yet.</p>
+        <p className="text-muted-foreground">Nothing to summarize yet.</p>
       ) : (
-        <ul>
+        <ul className="mt-2 grid max-w-sm gap-1">
           {summary.byCategory.map(entry => (
-            <li key={entry.key}>
+            <li key={entry.key} className="flex justify-between">
               <span>{entry.name}</span>
-              <span>{money.format(entry.total)}</span>
+              <span className="tabular-nums">{money.format(entry.total)}</span>
             </li>
           ))}
         </ul>

@@ -71,7 +71,7 @@ test('says so while loading and when the month is empty', () => {
 
   rerender(<TransactionList {...props} transactions={[]} loading={false} />)
   expect(screen.getByText('No transactions for August 2026.')).toBeInTheDocument()
-  expect(screen.getByText(/upload a statement/i)).toBeInTheDocument()
+  expect(screen.getByText(/use import to add a statement/i)).toBeInTheDocument()
 })
 
 test('assigning a category patches the row', async () => {
