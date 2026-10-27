@@ -9,7 +9,9 @@ CREATE TABLE users (
 CREATE TABLE categories(
   id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   name VARCHAR NOT NULL,
-  user_id BIGINT REFERENCES users (id) ON DELETE CASCADE -- null if default, not null if user 
+  user_id BIGINT REFERENCES users (id) ON DELETE CASCADE, -- null if default, not null if user 
+  color VARCHAR, -- six-digit hex, e.g. "#3b82f6"; null until one is assigned
+  excluded_from_spend BOOLEAN NOT NULL DEFAULT false -- left out of spending and income totals
 );
 
 CREATE TABLE transactions(

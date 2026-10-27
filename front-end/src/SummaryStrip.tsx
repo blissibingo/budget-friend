@@ -33,7 +33,16 @@ function SummaryStrip({ transactions, categories, period, loading, error }: Prop
 
       <p>
         Total spend for {formatPeriod(period)}{' '}
-        <strong>{stale ? '—' : money.format(summary.total)}</strong>
+        <strong>{stale ? '—' : money.format(summary.spending)}</strong>
+      </p>
+      <p>
+        Income <strong>{stale ? '—' : money.format(summary.income)}</strong>
+      </p>
+      <p>
+        Net <strong>{stale ? '—' : money.format(summary.net)}</strong>
+      </p>
+      <p>
+        Saved <strong>{stale ? '—' : money.format(summary.saved)}</strong>
       </p>
 
       {stale ? null : summary.byCategory.length === 0 ? (

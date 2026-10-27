@@ -7,6 +7,9 @@ export type Category = {
   id: number
   name: string
   user_id: number | null
+  color: string | null
+  // left out of spending, income, and every breakdown
+  excluded_from_spend: boolean
 }
 
 export type Transaction = {

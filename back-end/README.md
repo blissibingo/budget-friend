@@ -18,10 +18,12 @@ Requires **PostgreSQL 15 or newer** — the transactions dedupe constraint uses
    psql -d budget_friend -f db/schema.sql
    psql -d budget_friend -f db/migrations/0002_seed_default_categories.sql
    psql -d budget_friend -f db/migrations/0003_unique_category_name_per_user.sql
+   psql -d budget_friend -f db/migrations/0007_category_color_and_exclusion.sql
    ```
    `schema.sql` is the current table shape, so `0001`, `0004`, `0005`, and `0006` are
    already baked into it — running them on a fresh database will fail. `0002`
-   and `0003` are not, so a fresh database needs them.
+   and `0003` are not, so a fresh database needs them. `0007` is safe on a
+   fresh database and is needed for its Transfer and Savings seeds.
 
    **Upgrading a database created before 2026-08-16** — run `0004` on it:
    ```
@@ -38,12 +40,16 @@ Requires **PostgreSQL 15 or newer** — the transactions dedupe constraint uses
    It only adds an index, so uploads work without it, just with a sequential
    scan per parsed row.
 
-   **Upgrading a database created before 2026-10-27** — run `0006` on it:
+   **Upgrading a database created before 2026-10-27** — run `0006` and `0007`
+   on it:
    ```
    psql -d budget_friend -f db/migrations/0006_placeholder_memory_lookup_index.sql
+   psql -d budget_friend -f db/migrations/0007_category_color_and_exclusion.sql
    ```
-   It only adds an index for looking up `Bank transaction` rows by description.
-   Apply it to `budget_friend_test` too, or the index test fails.
+   `0006` only adds an index for looking up `Bank transaction` rows by
+   description. `0007` adds `color` and `excluded_from_spend` to categories and
+   seeds the Transfer and Savings defaults. Apply both to `budget_friend_test`
+   too, or the upload and category tests fail.
 2. Seed the single hardcoded user (v1 has no auth — every persisted
    transaction and read is scoped to this one row):
    ```

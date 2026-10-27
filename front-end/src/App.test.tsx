@@ -64,7 +64,7 @@ function transaction(overrides: Partial<Transaction> = {}): Transaction {
   }
 }
 
-const CATEGORIES: Category[] = [{ id: 7, name: 'Groceries', user_id: null }]
+const CATEGORIES: Category[] = [{ id: 7, name: 'Groceries', user_id: null, color: null, excluded_from_spend: false }]
 
 function rowFor(merchant: string) {
   return screen.getByDisplayValue(merchant).closest('tr') as HTMLElement
