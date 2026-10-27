@@ -4,6 +4,9 @@ import type { Category, Transaction } from './api'
 
 const UNCATEGORIZED = 'uncategorized'
 
+// the default category whose withdrawals are reported as saved
+const SAVINGS = 'Savings'
+
 export type CategorySpend = {
   key: string
   name: string
@@ -11,14 +14,18 @@ export type CategorySpend = {
 }
 
 export type Summary = {
-  total: number
+  spending: number
+  income: number
+  net: number
+  saved: number
   byCategory: CategorySpend[]
+  uncategorizedCount: number
 }
 
-// the outgoing side of an amount, as a positive number
-function spend(amount: string): number {
-  const value = Number(amount)
-  return Number.isFinite(value) ? -value : 0
+// the signed amount, or 0 when it is not a number
+function value(amount: string): number {
+  const parsed = Number(amount)
+  return Number.isFinite(parsed) ? parsed : 0
 }
 
 function round(value: number): number {
@@ -29,34 +36,61 @@ export function summarize(
   transactions: Transaction[],
   categories: Category[],
 ): Summary {
-  const names = new Map(categories.map(category => [String(category.id), category.name]))
+  const byId = new Map(categories.map(category => [String(category.id), category]))
+  const savingsId = categories.find(
+    category => category.name === SAVINGS && category.user_id === null,
+  )?.id
 
-  // a credit nets off its own category; an uncategorized one is left out
-  const totals = transactions.reduce((acc, transaction) => {
-    const amount = spend(transaction.amount)
-    const uncategorized = transaction.category_id === null
-    if (amount === 0 || (uncategorized && amount < 0)) return acc
+  let uncategorizedSpend = 0
+  let uncategorizedIncome = 0
+  let saved = 0
+  let uncategorizedCount = 0
+  const netByCategory = new Map<string, number>()
 
-    const key = uncategorized ? UNCATEGORIZED : String(transaction.category_id)
-    acc.set(key, (acc.get(key) ?? 0) + amount)
-    return acc
-  }, new Map<string, number>())
+  // Uncategorized rows split by sign; categorized rows net per category, so a
+  // refund offsets its own category.
+  for (const transaction of transactions) {
+    const amount = value(transaction.amount)
 
-  const byCategory = [...totals]
-    .filter(([, total]) => round(total) > 0)
-    .map(([key, total]) => ({
-      key,
-      name: key === UNCATEGORIZED ? 'Uncategorized' : names.get(key) ?? 'Other',
-      total: round(total),
-    }))
-    .sort((a, b) => {
-      if (a.key === UNCATEGORIZED) return 1
-      if (b.key === UNCATEGORIZED) return -1
-      return b.total - a.total
-    })
+    if (transaction.category_id === null) {
+      uncategorizedCount += 1
+      if (amount < 0) uncategorizedSpend -= amount
+      else uncategorizedIncome += amount
+      continue
+    }
+
+    if (transaction.category_id === savingsId) {
+      saved -= amount
+      continue
+    }
+
+    const key = String(transaction.category_id)
+    if (byId.get(key)?.excluded_from_spend) continue
+    netByCategory.set(key, (netByCategory.get(key) ?? 0) + amount)
+  }
+
+  // a category netting positive counts toward income, not the breakdown
+  let income = uncategorizedIncome
+  const byCategory: CategorySpend[] = []
+  for (const [key, net] of netByCategory) {
+    const total = round(-net)
+    if (total > 0) byCategory.push({ key, name: byId.get(key)?.name ?? 'Other', total })
+    else income -= total
+  }
+  byCategory.sort((a, b) => b.total - a.total)
+  if (round(uncategorizedSpend) > 0) {
+    byCategory.push({ key: UNCATEGORIZED, name: 'Uncategorized', total: round(uncategorizedSpend) })
+  }
+
+  const spending = round(byCategory.reduce((sum, entry) => sum + entry.total, 0))
+  income = round(income)
 
   return {
-    total: round(byCategory.reduce((sum, entry) => sum + entry.total, 0)),
+    spending,
+    income,
+    net: round(income - spending),
+    saved: round(saved),
     byCategory,
+    uncategorizedCount,
   }
 }

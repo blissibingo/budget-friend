@@ -4,6 +4,9 @@ const { DEFAULT_USER_ID } = require('../config');
 
 const router = express.Router();
 
+// a six-digit hex colour, e.g. "#3b82f6"
+const COLOR_PATTERN = /^#[0-9a-f]{6}$/i;
+
 router.get('/', async (req, res) => {
   try {
     const result = await query(
@@ -20,10 +23,15 @@ router.post('/', express.json(), async (req, res) => {
   const name = typeof req.body.name === 'string' ? req.body.name.trim() : '';
   if (!name) return res.status(400).json({ error: 'name is required' });
 
+  const color = req.body.color ?? null;
+  if (color !== null && (typeof color !== 'string' || !COLOR_PATTERN.test(color))) {
+    return res.status(400).json({ error: 'color must be a six-digit hex code like #3b82f6' });
+  }
+
   try {
     const result = await query(
-      'INSERT INTO categories (name, user_id) VALUES ($1, $2) RETURNING *',
-      [name, DEFAULT_USER_ID]
+      'INSERT INTO categories (name, user_id, color) VALUES ($1, $2, $3) RETURNING *',
+      [name, DEFAULT_USER_ID, color]
     );
     res.json({ category: result.rows[0] });
   } catch (err) {

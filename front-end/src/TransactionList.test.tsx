@@ -22,8 +22,8 @@ function transaction(overrides: Partial<Transaction> = {}): Transaction {
 }
 
 const CATEGORIES: Category[] = [
-  { id: 7, name: 'Groceries', user_id: null },
-  { id: 8, name: 'Transport', user_id: null },
+  { id: 7, name: 'Groceries', user_id: null, color: null, excluded_from_spend: false },
+  { id: 8, name: 'Transport', user_id: null, color: null, excluded_from_spend: false },
 ]
 
 type Props = Parameters<typeof TransactionList>[0]
