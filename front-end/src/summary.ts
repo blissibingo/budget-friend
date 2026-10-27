@@ -1,8 +1,9 @@
-// rolls the fetched transactions up into the figures the summary strip shows
+// rolls the fetched transactions up into the month's figures and breakdown
 
 import type { Category, Transaction } from './api'
 
-const UNCATEGORIZED = 'uncategorized'
+// the breakdown key uncategorized spending is filed under
+export const UNCATEGORIZED = 'uncategorized'
 
 // the default category whose withdrawals are reported as saved
 const SAVINGS = 'Savings'
@@ -28,7 +29,8 @@ function value(amount: string): number {
   return Number.isFinite(parsed) ? parsed : 0
 }
 
-function round(value: number): number {
+// rounds to whole cents
+export function round(value: number): number {
   return Math.round(value * 100) / 100
 }
 

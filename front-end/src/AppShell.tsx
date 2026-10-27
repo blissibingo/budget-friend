@@ -1,5 +1,6 @@
 // the persistent header and the content column every view renders into
 
+import { useState } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router'
 
 import { Button } from '@/components/ui/button'
@@ -30,6 +31,7 @@ function AppShell() {
   const [period, setPeriod] = useMonth()
   const data = useTransactions(period)
   const { search } = useLocation()
+  const [importing, setImporting] = useState(false)
 
   // moves to the uploaded month, or refetches when it is already in view
   function handleUploaded(result: UploadResult) {
@@ -47,7 +49,7 @@ function AppShell() {
           <MonthStepper period={period} onChange={setPeriod} />
 
           <div className="flex justify-end gap-2">
-            <Dialog>
+            <Dialog open={importing} onOpenChange={setImporting}>
               <DialogTrigger asChild>
                 <Button variant="outline" size="sm">
                   Import
@@ -89,7 +91,9 @@ function AppShell() {
       </header>
 
       <main className="mx-auto max-w-5xl px-8 py-7">
-        <Outlet context={{ ...data, period } satisfies Shell} />
+        <Outlet
+          context={{ ...data, period, openImport: () => setImporting(true) } satisfies Shell}
+        />
       </main>
     </div>
   )
