@@ -27,7 +27,9 @@ require re-doing the same manual work every month.
 ## Running locally
 
 One-time setup: PostgreSQL 15+, the schema, and the seeded user — see
-[back-end/README.md](back-end/README.md). Then install every workspace's
+[back-end/README.md](back-end/README.md). For everyday database tasks — starting
+Postgres, applying a migration, looking at your data, backing up — see the
+[database cheat sheet](back-end/README.md#database-cheat-sheet). Then install every workspace's
 dependencies:
 
 ```

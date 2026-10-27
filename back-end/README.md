@@ -56,6 +56,115 @@ Requires **PostgreSQL 15 or newer** — the transactions dedupe constraint uses
    psql -d budget_friend -c "INSERT INTO users (username, email, first_name, last_name) VALUES ('default', 'default@budgetfriend.local', 'Default', 'User') RETURNING id;"
    ```
 
+## Database cheat sheet
+
+Run these from `back-end/`. `budget_friend` is your real data;
+`budget_friend_test` is the throwaway copy the tests wipe on every run.
+
+### Start Postgres
+
+Postgres runs from **Postgres.app** — open it and click **Start** (the
+elephant appears in the menu bar). Check it is up:
+
+```
+pg_isready          # "accepting connections" means it's running
+psql -l             # lists databases; both budget_friend* should appear
+```
+
+### Look around
+
+```
+psql -d budget_friend          # opens a SQL prompt on your real data
+```
+
+Inside the prompt:
+
+| Command | Does |
+| --- | --- |
+| `\dt` | list tables |
+| `\d transactions` | show a table's columns and indexes |
+| `\x` | toggle one-field-per-line output for wide rows |
+| `\q` | quit |
+
+SQL statements end with `;`. A few useful ones:
+
+```sql
+-- every category, and whether it counts toward spending
+SELECT id, name, user_id, excluded_from_spend FROM categories ORDER BY name;
+
+-- one month's transactions
+SELECT date, amount, merchant, description, category_id
+FROM transactions WHERE date >= '2026-09-01' AND date < '2026-10-01'
+ORDER BY date;
+
+-- what still needs a category
+SELECT count(*) FROM transactions WHERE category_id IS NULL;
+```
+
+To run a single query without opening the prompt:
+`psql -d budget_friend -c "SELECT count(*) FROM transactions;"`
+
+### Apply a migration
+
+New migrations land in `db/migrations/`. Apply each one to **both** databases
+— the tests run against `budget_friend_test` and fail if it is behind:
+
+```
+psql -d budget_friend      -f db/migrations/0007_category_color_and_exclusion.sql
+psql -d budget_friend_test -f db/migrations/0007_category_color_and_exclusion.sql
+```
+
+Nothing records which migrations have run, so check by looking for what each
+one adds:
+
+| Migration | Applied if… | Check with |
+| --- | --- | --- |
+| `0004` | `transactions_dedupe_unique` is listed | `\d transactions` |
+| `0005` | `transactions_merchant_memory_idx` is listed | `\d transactions` |
+| `0006` | `transactions_placeholder_memory_idx` is listed | `\d transactions` |
+| `0007` | `color` and `excluded_from_spend` columns exist | `\d categories` |
+
+### Back up and restore
+
+Take a backup before anything destructive:
+
+```
+pg_dump -Fc -d budget_friend -f ~/budget_friend_$(date +%F).dump
+```
+
+Restore one over the current data (replaces what is there):
+
+```
+pg_restore --clean --if-exists -d budget_friend ~/budget_friend_2026-10-27.dump
+```
+
+### Fix or remove data
+
+```sql
+-- delete one month so its statements can be re-imported
+DELETE FROM transactions WHERE date >= '2026-09-01' AND date < '2026-10-01';
+
+-- clear a category from every transaction (they return to uncategorized)
+UPDATE transactions SET category_id = NULL WHERE category_id = 12;
+```
+
+`DELETE` and `UPDATE` without a `WHERE` change every row — back up first.
+
+### Rebuild the test database
+
+If the test database is in a bad state, recreate it from scratch. The tests
+seed their own user, so no step 2 is needed:
+
+```
+dropdb budget_friend_test
+createdb budget_friend_test
+psql -d budget_friend_test -f db/schema.sql
+psql -d budget_friend_test -f db/migrations/0002_seed_default_categories.sql
+psql -d budget_friend_test -f db/migrations/0003_unique_category_name_per_user.sql
+```
+
+Plus any migration the setup steps above list for a fresh database.
+
 ## Environment variables
 
 Connection is configured via the standard `pg` environment variables
