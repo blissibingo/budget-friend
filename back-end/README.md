@@ -19,7 +19,7 @@ Requires **PostgreSQL 15 or newer** — the transactions dedupe constraint uses
    psql -d budget_friend -f db/migrations/0002_seed_default_categories.sql
    psql -d budget_friend -f db/migrations/0003_unique_category_name_per_user.sql
    ```
-   `schema.sql` is the current table shape, so `0001`, `0004`, and `0005` are
+   `schema.sql` is the current table shape, so `0001`, `0004`, `0005`, and `0006` are
    already baked into it — running them on a fresh database will fail. `0002`
    and `0003` are not, so a fresh database needs them.
 
@@ -37,6 +37,13 @@ Requires **PostgreSQL 15 or newer** — the transactions dedupe constraint uses
    ```
    It only adds an index, so uploads work without it, just with a sequential
    scan per parsed row.
+
+   **Upgrading a database created before 2026-10-27** — run `0006` on it:
+   ```
+   psql -d budget_friend -f db/migrations/0006_placeholder_memory_lookup_index.sql
+   ```
+   It only adds an index for looking up `Bank transaction` rows by description.
+   Apply it to `budget_friend_test` too, or the index test fails.
 2. Seed the single hardcoded user (v1 has no auth — every persisted
    transaction and read is scoped to this one row):
    ```
