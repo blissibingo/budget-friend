@@ -1,5 +1,6 @@
 import { useId, useState, type FormEvent } from 'react'
 
+import { Button } from '@/components/ui/button'
 import { uploadStatement, type UploadResult } from './api'
 
 // selectable statement sources
@@ -43,22 +44,24 @@ function UploadStatement({ onUploaded }: Props) {
   }
 
   return (
-    <form onSubmit={handleSubmit}>
-      <div>
-        <label htmlFor={fileInputId}>Statement PDF</label>
+    <form onSubmit={handleSubmit} className="grid gap-4">
+      <div className="grid gap-1.5">
+        <label htmlFor={fileInputId} className="text-sm font-medium">Statement PDF</label>
         <input
           id={fileInputId}
           type="file"
           accept="application/pdf"
+          className="text-sm file:mr-3 file:rounded-md file:border file:border-input file:bg-secondary file:px-3 file:py-1 file:text-sm file:text-foreground"
           onChange={event => setFile(event.target.files?.[0] ?? null)}
         />
       </div>
 
-      <div>
-        <label htmlFor={sourceInputId}>Source</label>
+      <div className="grid gap-1.5">
+        <label htmlFor={sourceInputId} className="text-sm font-medium">Source</label>
         <select
           id={sourceInputId}
           value={source}
+          className="h-8 rounded-md border border-input bg-background px-2 text-sm"
           onChange={event => setSource(event.target.value)}
         >
           {SOURCES.map(({ value, label }) => (
@@ -69,17 +72,19 @@ function UploadStatement({ onUploaded }: Props) {
         </select>
       </div>
 
-      <button type="submit" disabled={!file || uploading}>
+      <Button type="submit" className="justify-self-start" disabled={!file || uploading}>
         {uploading ? 'Uploading…' : 'Upload'}
-      </button>
+      </Button>
 
       {/* always-mounted live regions for the upload outcome */}
-      <p role="status">
+      <p role="status" className="text-sm tabular-nums">
         {result &&
           `${result.inserted_count} imported, ${result.skipped_count} skipped as duplicates`}
       </p>
 
-      <p role="alert">{error}</p>
+      <p role="alert" className="text-sm text-destructive">
+        {error}
+      </p>
     </form>
   )
 }

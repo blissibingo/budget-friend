@@ -1,5 +1,6 @@
 import { useId, useState } from 'react'
 
+import { Button } from '@/components/ui/button'
 import type { Category, Transaction, TransactionEdit } from './api'
 import { formatPeriod, type Period } from './period'
 
@@ -47,11 +48,12 @@ function TransactionRow({ transaction, categories, onEdit, onDelete }: RowProps)
   }
 
   return (
-    <tr>
+    <tr className="[&>td]:py-1 [&>td]:pr-2">
       <td>
         <input
           aria-label="Date"
           type="date"
+          className="h-8 rounded-md border border-input bg-transparent px-2 text-sm"
           value={draft.date}
           onChange={event => setDraft({ ...draft, date: event.target.value })}
           onBlur={() => commit('date', { date: draft.date })}
@@ -60,6 +62,7 @@ function TransactionRow({ transaction, categories, onEdit, onDelete }: RowProps)
       <td>
         <input
           aria-label="Merchant"
+          className="h-8 rounded-md border border-input bg-transparent px-2 text-sm"
           value={draft.merchant}
           onChange={event => setDraft({ ...draft, merchant: event.target.value })}
           onBlur={() => commit('merchant', { merchant: draft.merchant })}
@@ -68,6 +71,7 @@ function TransactionRow({ transaction, categories, onEdit, onDelete }: RowProps)
       <td>
         <input
           aria-label="Description"
+          className="h-8 rounded-md border border-input bg-transparent px-2 text-sm"
           value={draft.description}
           onChange={event => setDraft({ ...draft, description: event.target.value })}
           onBlur={() => commit('description', { description: draft.description || null })}
@@ -76,6 +80,7 @@ function TransactionRow({ transaction, categories, onEdit, onDelete }: RowProps)
       <td>
         <input
           aria-label="Amount"
+          className="h-8 rounded-md border border-input bg-transparent px-2 text-sm w-28 text-right tabular-nums"
           type="number"
           step="0.01"
           value={draft.amount}
@@ -86,6 +91,7 @@ function TransactionRow({ transaction, categories, onEdit, onDelete }: RowProps)
       <td>
         <select
           aria-label="Category"
+          className="h-8 rounded-md border border-input bg-transparent px-2 text-sm"
           value={transaction.category_id === null ? '' : String(transaction.category_id)}
           onChange={event =>
             onEdit(transaction.id, {
@@ -102,9 +108,14 @@ function TransactionRow({ transaction, categories, onEdit, onDelete }: RowProps)
         </select>
       </td>
       <td>
-        <button type="button" onClick={() => onDelete(transaction.id)}>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={() => onDelete(transaction.id)}
+        >
           Delete
-        </button>
+        </Button>
       </td>
     </tr>
   )
@@ -132,23 +143,27 @@ function TransactionList({
   const headingId = useId()
 
   return (
-    <section aria-labelledby={headingId}>
-      <h2 id={headingId}>Transactions</h2>
+    <section aria-labelledby={headingId} className="grid gap-3">
+      <h2 id={headingId} className="text-lg font-semibold">
+        Transactions
+      </h2>
 
       {/* always-mounted live region for the outcome of an edit */}
-      <p role="alert">{error}</p>
+      <p role="alert" className="text-destructive">
+        {error}
+      </p>
 
       {loading ? (
-        <p>Loading transactions…</p>
+        <p className="text-muted-foreground">Loading transactions…</p>
       ) : transactions.length === 0 ? (
         <>
           <p>No transactions for {formatPeriod(period)}.</p>
-          <p>Upload a statement above to import that month.</p>
+          <p>Use Import to add a statement for that month.</p>
         </>
       ) : (
-        <table>
+        <table className="text-left text-sm">
           <thead>
-            <tr>
+            <tr className="text-muted-foreground [&>th]:pb-2 [&>th]:font-medium">
               <th scope="col">Date</th>
               <th scope="col">Merchant</th>
               <th scope="col">Description</th>

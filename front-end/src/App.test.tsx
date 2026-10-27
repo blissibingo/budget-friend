@@ -1,6 +1,7 @@
 import { beforeEach, expect, test, vi } from 'vitest'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { createMemoryRouter, RouterProvider } from 'react-router'
 
 import {
   ApiError,
@@ -13,7 +14,7 @@ import {
   type Transaction,
   type UploadResult,
 } from './api'
-import App from './App'
+import { routes } from './routes'
 
 const NOW = new Date()
 const CURRENT = { month: NOW.getMonth() + 1, year: NOW.getFullYear() }
@@ -95,12 +96,25 @@ function uploadResult(overrides: Partial<UploadResult> = {}): UploadResult {
   }
 }
 
+// opens the import dialog from the header and uploads a statement through it
 async function uploadStatementFile(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole('button', { name: 'Import' }))
   await user.upload(
     screen.getByLabelText(/statement pdf/i),
     new File(['%PDF-1.4'], 'statement.pdf', { type: 'application/pdf' }),
   )
   await user.click(screen.getByRole('button', { name: /^upload/i }))
+}
+
+// renders the whole app in a memory router opened at the given url
+function renderApp(url = '/') {
+  const router = createMemoryRouter(routes, { initialEntries: [url] })
+  render(<RouterProvider router={router} />)
+  return router
+}
+
+function tab(name: string) {
+  return screen.getByRole('link', { name })
 }
 
 beforeEach(() => {
@@ -111,14 +125,130 @@ beforeEach(() => {
   uploadStatementMock.mockReset()
 })
 
+test('opens on the overview for the current month', async () => {
+  const router = renderApp()
+
+  expect(await screen.findByRole('region', { name: /summary/i })).toBeInTheDocument()
+  expect(tab('Overview')).toHaveAttribute('aria-current', 'page')
+  expect(router.state.location.pathname).toBe('/')
+  await waitFor(() => expect(getTransactionsMock).toHaveBeenCalledWith(CURRENT))
+})
+
+test('the tabs move between the three views', async () => {
+  getTransactionsMock.mockResolvedValue([transaction()])
+  const user = userEvent.setup()
+
+  renderApp()
+
+  await user.click(await screen.findByRole('link', { name: 'Transactions' }))
+  expect(await screen.findByDisplayValue('Loblaws')).toBeInTheDocument()
+  expect(screen.queryByRole('region', { name: /summary/i })).not.toBeInTheDocument()
+
+  await user.click(tab('Review'))
+  expect(await screen.findByRole('heading', { name: 'Review' })).toBeInTheDocument()
+  expect(screen.queryByDisplayValue('Loblaws')).not.toBeInTheDocument()
+
+  await user.click(tab('Overview'))
+  expect(await screen.findByRole('region', { name: /summary/i })).toBeInTheDocument()
+})
+
+test('the month is read from the url', async () => {
+  renderApp('/transactions?month=2026-03')
+
+  expect(await screen.findByText('March 2026')).toBeInTheDocument()
+  await waitFor(() =>
+    expect(getTransactionsMock).toHaveBeenCalledWith({ month: 3, year: 2026 }),
+  )
+  expect(tab('Transactions')).toHaveAttribute('aria-current', 'page')
+})
+
+test('an unreadable month in the url falls back to the current month', async () => {
+  renderApp('/?month=banana')
+
+  expect(await screen.findByText(label(CURRENT))).toBeInTheDocument()
+  await waitFor(() => expect(getTransactionsMock).toHaveBeenCalledWith(CURRENT))
+})
+
+test('the month is written to the url when none is given', async () => {
+  const router = renderApp('/transactions')
+
+  await screen.findByText(label(CURRENT))
+  await waitFor(() =>
+    expect(router.state.location.search).toBe(
+      `?month=${CURRENT.year}-${String(CURRENT.month).padStart(2, '0')}`,
+    ),
+  )
+  expect(router.state.location.pathname).toBe('/transactions')
+})
+
+test('a future month in the url is replaced by the current month', async () => {
+  renderApp(`/?month=${CURRENT.year + 1}-01`)
+
+  expect(await screen.findByText(label(CURRENT))).toBeInTheDocument()
+  expect(stepButton('Next')).toBeDisabled()
+  expect(getTransactionsMock).not.toHaveBeenCalledWith({ month: 1, year: CURRENT.year + 1 })
+})
+
+test('an unknown path returns to the overview keeping the month', async () => {
+  const router = renderApp('/nowhere?month=2026-03')
+
+  expect(await screen.findByText('March 2026')).toBeInTheDocument()
+  expect(router.state.location.pathname).toBe('/')
+  expect(router.state.location.search).toBe('?month=2026-03')
+})
+
+test('stepping the month writes it to the url and keeps the view', async () => {
+  const user = userEvent.setup()
+  const router = renderApp('/transactions?month=2026-03')
+
+  await screen.findByText('March 2026')
+  await user.click(stepButton('Previous'))
+
+  expect(router.state.location.pathname).toBe('/transactions')
+  expect(router.state.location.search).toBe('?month=2026-02')
+  expect(await screen.findByText('February 2026')).toBeInTheDocument()
+})
+
+test('switching views keeps the month', async () => {
+  const user = userEvent.setup()
+  const router = renderApp('/?month=2026-03')
+
+  await screen.findByText('March 2026')
+  await user.click(tab('Review'))
+
+  expect(router.state.location.pathname).toBe('/review')
+  expect(router.state.location.search).toBe('?month=2026-03')
+  expect(screen.getByText('March 2026')).toBeInTheDocument()
+})
+
+test('going back returns to the previous view', async () => {
+  const user = userEvent.setup()
+  const router = renderApp('/?month=2026-03')
+
+  await screen.findByText('March 2026')
+  await user.click(tab('Transactions'))
+  expect(router.state.location.pathname).toBe('/transactions')
+
+  await act(() => router.navigate(-1))
+
+  expect(router.state.location.pathname).toBe('/')
+  expect(router.state.location.search).toBe('?month=2026-03')
+  expect(await screen.findByRole('region', { name: /summary/i })).toBeInTheDocument()
+})
+
+test('the header carries the import and category actions', async () => {
+  renderApp()
+
+  expect(await screen.findByRole('heading', { name: 'Budget Friend' })).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: /import/i })).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: /categories/i })).toBeInTheDocument()
+})
+
 test('loads the current month on mount', async () => {
   getTransactionsMock.mockResolvedValue([transaction()])
   const now = new Date()
 
-  render(<App />)
-
-  expect(screen.getByRole('heading', { name: 'Budget Friend' })).toBeInTheDocument()
-  expect(screen.getByLabelText(/statement pdf/i)).toBeInTheDocument()
+  renderApp('/transactions')
 
   await waitFor(() => {
     expect(getTransactionsMock).toHaveBeenCalledWith({
@@ -143,7 +273,7 @@ test('a successful upload reloads the transaction list', async () => {
   )
   const user = userEvent.setup()
 
-  render(<App />)
+  renderApp('/transactions')
 
   expect(await screen.findByText(/no transactions/i)).toBeInTheDocument()
   await uploadStatementFile(user)
@@ -159,7 +289,7 @@ test('stepping back requests and renders the previous month', async () => {
     .mockResolvedValueOnce([transaction({ merchant: 'Petro-Canada' })])
   const user = userEvent.setup()
 
-  render(<App />)
+  renderApp('/transactions')
 
   expect(await screen.findByText(label(CURRENT))).toBeInTheDocument()
   await user.click(stepButton('Previous'))
@@ -174,7 +304,7 @@ test('stepping back requests and renders the previous month', async () => {
 test('stepping forward returns to the current month', async () => {
   const user = userEvent.setup()
 
-  render(<App />)
+  renderApp('/transactions')
 
   await screen.findByText(label(CURRENT))
   await user.click(stepButton('Previous'))
@@ -189,7 +319,7 @@ test('stepping forward returns to the current month', async () => {
 })
 
 test('the forward arrow is disabled on the current month', async () => {
-  render(<App />)
+  renderApp('/transactions')
 
   await screen.findByText(label(CURRENT))
   expect(stepButton('Next')).toBeDisabled()
@@ -209,7 +339,7 @@ test('an upload lands on the month of the latest inserted transaction', async ()
   )
   const user = userEvent.setup()
 
-  render(<App />)
+  renderApp('/transactions')
 
   await screen.findByText(label(CURRENT))
   await uploadStatementFile(user)
@@ -230,7 +360,7 @@ test('a fully duplicate re-upload falls back to the statement period end month',
   )
   const user = userEvent.setup()
 
-  render(<App />)
+  renderApp('/transactions')
 
   await screen.findByText(label(CURRENT))
   await uploadStatementFile(user)
@@ -246,7 +376,7 @@ test('an upload with nothing to go on leaves the period alone', async () => {
   )
   const user = userEvent.setup()
 
-  render(<App />)
+  renderApp('/transactions')
 
   await screen.findByText(label(CURRENT))
   await user.click(stepButton('Previous'))
@@ -261,10 +391,10 @@ test('an upload with nothing to go on leaves the period alone', async () => {
   expect(screen.getByText(label(PREVIOUS))).toBeInTheDocument()
 })
 
-test('an empty month names the period and points at the uploader', async () => {
+test('an empty month names the period and points at import', async () => {
   const user = userEvent.setup()
 
-  render(<App />)
+  renderApp('/transactions')
 
   await screen.findByText(label(CURRENT))
   await user.click(stepButton('Previous'))
@@ -272,7 +402,7 @@ test('an empty month names the period and points at the uploader', async () => {
   expect(
     await screen.findByText(`No transactions for ${label(PREVIOUS)}.`),
   ).toBeInTheDocument()
-  expect(screen.getByText(/upload a statement/i)).toBeInTheDocument()
+  expect(screen.getByText(/use import to add a statement/i)).toBeInTheDocument()
 })
 
 test('assigning a category persists it and keeps it on screen', async () => {
@@ -280,7 +410,7 @@ test('assigning a category persists it and keeps it on screen', async () => {
   updateTransactionMock.mockResolvedValue(transaction({ category_id: 7 }))
   const user = userEvent.setup()
 
-  render(<App />)
+  renderApp('/transactions')
 
   await screen.findByDisplayValue('Loblaws')
   const category = within(rowFor('Loblaws')).getByLabelText(/category/i)
@@ -301,7 +431,7 @@ test('deleting a row removes it from the list', async () => {
   ])
   const user = userEvent.setup()
 
-  render(<App />)
+  renderApp('/transactions')
 
   await screen.findByDisplayValue('Loblaws')
   await user.click(within(rowFor('Loblaws')).getByRole('button', { name: /delete/i }))
@@ -315,62 +445,61 @@ test('deleting a row removes it from the list', async () => {
   expect(screen.getByDisplayValue('Petro-Canada')).toBeInTheDocument()
 })
 
-test('summarizes the loaded month above the list', async () => {
+test('the overview summarizes the loaded month', async () => {
   getTransactionsMock.mockResolvedValue([
     transaction({ id: 1, amount: '-42.50', category_id: 7 }),
     transaction({ id: 2, amount: '-60.00', merchant: 'Petro-Canada' }),
   ])
 
-  render(<App />)
+  renderApp('/')
 
-  await screen.findByDisplayValue('Loblaws')
-  expect(
-    within(summary()).getByText(new RegExp(`total spend for ${label(CURRENT)}`, 'i')),
-  ).toHaveTextContent('$102.50')
+  await waitFor(() => {
+    expect(
+      within(summary()).getByText(new RegExp(`total spend for ${label(CURRENT)}`, 'i')),
+    ).toHaveTextContent('$102.50')
+  })
   expect(
     within(summary())
       .getAllByRole('listitem')
       .map(entry => entry.textContent),
   ).toEqual(['Groceries$42.50', 'Uncategorized$60.00'])
-
-  // the strip precedes the list in the document
-  expect(
-    summary().compareDocumentPosition(screen.getByRole('region', { name: /transactions/i })),
-  ).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
 })
 
-test('the breakdown follows a category change in the list', async () => {
+test('the overview follows a category change made in the transactions view', async () => {
   getTransactionsMock.mockResolvedValue([transaction({ amount: '-42.50' })])
   updateTransactionMock.mockResolvedValue(
     transaction({ amount: '-42.50', category_id: 7 }),
   )
   const user = userEvent.setup()
 
-  render(<App />)
+  renderApp('/transactions')
 
   await screen.findByDisplayValue('Loblaws')
-  expect(within(summary()).getByRole('listitem')).toHaveTextContent(
-    'Uncategorized$42.50',
-  )
-
   await user.selectOptions(within(rowFor('Loblaws')).getByLabelText(/category/i), '7')
+  await waitFor(() => expect(updateTransactionMock).toHaveBeenCalled())
+
+  await user.click(tab('Overview'))
 
   await waitFor(() => {
     expect(within(summary()).getByRole('listitem')).toHaveTextContent('Groceries$42.50')
   })
+  expect(getTransactionsMock).toHaveBeenCalledTimes(1)
 })
 
-test('the total follows a deleted row', async () => {
+test('the overview total follows a row deleted in the transactions view', async () => {
   getTransactionsMock.mockResolvedValue([
     transaction({ id: 1, amount: '-42.50' }),
     transaction({ id: 2, amount: '-60.00', merchant: 'Petro-Canada' }),
   ])
   const user = userEvent.setup()
 
-  render(<App />)
+  renderApp('/transactions')
 
   await screen.findByDisplayValue('Loblaws')
   await user.click(within(rowFor('Loblaws')).getByRole('button', { name: /delete/i }))
+  await waitFor(() => expect(screen.queryByDisplayValue('Loblaws')).not.toBeInTheDocument())
+
+  await user.click(tab('Overview'))
 
   await waitFor(() => {
     expect(within(summary()).getByText(/total spend/i)).toHaveTextContent('$60.00')
@@ -385,15 +514,18 @@ test('the summary follows the month stepper', async () => {
     ])
   const user = userEvent.setup()
 
-  render(<App />)
+  renderApp('/')
 
-  await screen.findByDisplayValue('Loblaws')
+  await waitFor(() => {
+    expect(within(summary()).getByText(/total spend/i)).toHaveTextContent('$42.50')
+  })
   await user.click(stepButton('Previous'))
 
-  await screen.findByDisplayValue('Petro-Canada')
-  expect(
-    within(summary()).getByText(new RegExp(`total spend for ${label(PREVIOUS)}`, 'i')),
-  ).toHaveTextContent('$60.00')
+  await waitFor(() => {
+    expect(
+      within(summary()).getByText(new RegExp(`total spend for ${label(PREVIOUS)}`, 'i')),
+    ).toHaveTextContent('$60.00')
+  })
 })
 
 test('a failed month load withholds the previous month total', async () => {
@@ -402,24 +534,28 @@ test('a failed month load withholds the previous month total', async () => {
     .mockRejectedValueOnce(new ApiError(500, 'Failed to fetch transactions'))
   const user = userEvent.setup()
 
-  render(<App />)
+  renderApp('/')
 
-  await screen.findByDisplayValue('Loblaws')
+  await waitFor(() => {
+    expect(within(summary()).getByText(/total spend/i)).toHaveTextContent('$42.50')
+  })
   await user.click(stepButton('Previous'))
 
   await waitFor(() => {
-    expect(listAlert()).toHaveTextContent('Failed to fetch transactions')
+    expect(
+      within(summary()).getByText(new RegExp(`total spend for ${label(PREVIOUS)}`, 'i')),
+    ).toHaveTextContent('—')
   })
   expect(within(summary()).queryByText('$42.50')).not.toBeInTheDocument()
-  expect(
-    within(summary()).getByText(new RegExp(`total spend for ${label(PREVIOUS)}`, 'i')),
-  ).toHaveTextContent('—')
+
+  await user.click(tab('Transactions'))
+  expect(listAlert()).toHaveTextContent('Failed to fetch transactions')
 })
 
 test('an empty month summarizes as zero', async () => {
   const user = userEvent.setup()
 
-  render(<App />)
+  renderApp('/')
 
   await screen.findByText(label(CURRENT))
   await user.click(stepButton('Previous'))
@@ -435,7 +571,7 @@ test('shows the server error message when an edit fails', async () => {
   updateTransactionMock.mockRejectedValue(new ApiError(404, 'Transaction not found'))
   const user = userEvent.setup()
 
-  render(<App />)
+  renderApp('/transactions')
 
   await screen.findByDisplayValue('Loblaws')
   await user.selectOptions(
@@ -451,7 +587,7 @@ test('shows the server error message when an edit fails', async () => {
 test('shows the server error message when the load fails', async () => {
   getTransactionsMock.mockRejectedValue(new ApiError(500, 'Failed to fetch transactions'))
 
-  render(<App />)
+  renderApp('/transactions')
 
   await waitFor(() => {
     expect(listAlert()).toHaveTextContent('Failed to fetch transactions')
