@@ -9,7 +9,8 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "prototype": "vite --open /prototype"
   },
   "dependencies": {
     "react": "^19.2.0",
